@@ -449,6 +449,8 @@ a { color: inherit; text-decoration: none; }
 .src-badge.own { background: var(--green-soft); color: var(--green); }
 .src-badge.out { background: var(--blue-soft); color: var(--blue); }
 .boq-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(86px, .75fr) minmax(105px, .85fr) 38px; gap: 8px; margin-bottom: 8px; align-items: center; }
+.bq-material-picker { min-width: 0; }
+.bq-material-search { padding-right: 32px !important; }
 .po-row { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; }
 .boq-row input, .boq-row select, .po-row input, .po-row select {
   width: 100%; height: 44px; padding: 9px 12px; border: 1.5px solid var(--line); border-radius: 10px; background: var(--surface-2); outline: none; min-width: 0; color: var(--ink);

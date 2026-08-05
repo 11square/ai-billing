@@ -175,6 +175,8 @@ const Menu = {
 
     // ----- BOQ editor -----
     const boqRows = $('#mf-boq-rows');
+    let boqPickerIndex = 0;
+    const materialDisplay = material => `${material.name} (${RawMaterials.qty(material.stock)} ${material.unit} available)`;
     const convertForCost = (quantity, from, to) => {
       if (from === to) return quantity;
       const factors = { 'kg:g': 1000, 'g:kg': 0.001, 'L:ml': 1000, 'ml:L': 0.001 };
@@ -194,19 +196,34 @@ const Menu = {
       const row = document.createElement('div');
       row.className = 'boq-row';
       const matched = rawMaterials.find(material => material.id === Number(line.rawMaterialId)) || rawMaterials.find(material => material.name.toLowerCase() === String(line.ingredient || '').toLowerCase());
+      const optionsId = `bq-material-options-${++boqPickerIndex}`;
       row.innerHTML = `
-        <select class="bq-material"><option value="">${rawMaterials.length ? 'Select inventory item' : 'No inventory items - add them in Stock & PO'}</option>${rawMaterials.map(material => `<option value="${material.id}" ${matched?.id === material.id ? 'selected' : ''}>${Ui.esc(material.name)} (${RawMaterials.qty(material.stock)} ${Ui.esc(material.unit)} available)</option>`).join('')}</select>
+        <div class="bq-material-picker bq-ing">
+          <input class="bq-material-search" type="search" list="${optionsId}" autocomplete="off"
+            placeholder="${rawMaterials.length ? 'Search inventory items...' : 'Add items in Stock & PO first'}"
+            value="${matched ? Ui.esc(materialDisplay(matched)) : ''}" aria-label="Search inventory items"/>
+          <input class="bq-material" type="hidden" value="${matched?.id || ''}"/>
+          <datalist id="${optionsId}">${rawMaterials.map(material => `<option value="${Ui.esc(materialDisplay(material))}"></option>`).join('')}</datalist>
+        </div>
         <input class="bq-qty" type="number" min="0" step="any" placeholder="Qty" value="${line.qty ?? ''}"/>
         <select class="bq-unit">
           <option value="" ${line.unit ? '' : 'selected'} disabled>Select unit</option>
           ${unitOptions(ingredientUnits, line.unit || matched?.unit || '')}
         </select>
         <button type="button" class="bq-del" title="Remove">✕</button>`;
-      row.querySelector('.bq-material').addEventListener('change', event => {
-        const material = rawMaterials.find(item => item.id === Number(event.target.value));
-        if (material) row.querySelector('.bq-unit').value = material.unit;
+      const materialSearch = row.querySelector('.bq-material-search');
+      const materialId = row.querySelector('.bq-material');
+      const syncMaterial = () => {
+        const term = materialSearch.value.trim().toLowerCase();
+        const material = rawMaterials.find(item => materialDisplay(item).toLowerCase() === term || item.name.toLowerCase() === term);
+        const previousId = Number(materialId.value);
+        materialId.value = material?.id || '';
+        if (material && material.id !== previousId) row.querySelector('.bq-unit').value = material.unit;
         updateRecipeCost();
-      });
+      };
+      materialSearch.addEventListener('input', syncMaterial);
+      materialSearch.addEventListener('change', syncMaterial);
+      materialSearch.addEventListener('focus', event => event.target.select());
       row.querySelector('.bq-qty').addEventListener('input', updateRecipeCost);
       row.querySelector('.bq-unit').addEventListener('change', updateRecipeCost);
       row.querySelector('.bq-del').addEventListener('click', () => { row.remove(); updateRecipeCost(); });
@@ -256,6 +273,12 @@ const Menu = {
         sourceType: $('#mf-source').value
       };
       if (body.sourceType === 'own') {
+        const unresolvedMaterial = [...m.el.querySelectorAll('.boq-row')].some(r =>
+          r.querySelector('.bq-material-search').value.trim() && !r.querySelector('.bq-material').value
+        );
+        if (unresolvedMaterial) {
+          Ui.toast('Choose an inventory item from the search results', 'error'); return;
+        }
         body.boq = [...m.el.querySelectorAll('.boq-row')].map(r => {
           const rawMaterialId = Number(r.querySelector('.bq-material').value);
           const material = rawMaterials.find(item => item.id === rawMaterialId);
