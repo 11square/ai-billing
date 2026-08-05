@@ -195,7 +195,7 @@ const Menu = {
       row.className = 'boq-row';
       const matched = rawMaterials.find(material => material.id === Number(line.rawMaterialId)) || rawMaterials.find(material => material.name.toLowerCase() === String(line.ingredient || '').toLowerCase());
       row.innerHTML = `
-        <select class="bq-material"><option value="">Select raw material</option>${rawMaterials.map(material => `<option value="${material.id}" ${matched?.id === material.id ? 'selected' : ''}>${Ui.esc(material.name)} (${RawMaterials.qty(material.stock)} ${Ui.esc(material.unit)} available)</option>`).join('')}</select>
+        <select class="bq-material"><option value="">${rawMaterials.length ? 'Select inventory item' : 'No inventory items - add them in Stock & PO'}</option>${rawMaterials.map(material => `<option value="${material.id}" ${matched?.id === material.id ? 'selected' : ''}>${Ui.esc(material.name)} (${RawMaterials.qty(material.stock)} ${Ui.esc(material.unit)} available)</option>`).join('')}</select>
         <input class="bq-qty" type="number" min="0" step="any" placeholder="Qty" value="${line.qty ?? ''}"/>
         <select class="bq-unit">
           <option value="" ${line.unit ? '' : 'selected'} disabled>Select unit</option>
