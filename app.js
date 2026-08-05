@@ -93,6 +93,25 @@ const createApp = () => {
     next();
   });
   app.use('/api', apiRoutes);
+
+  // The application shell must always be revalidated. Caching index.html here
+  // can leave an installed browser showing an older deployment while loading
+  // assets from the new one.
+  app.get(['/', '/index.html'], (req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.sendFile(path.join(publicDirectory, 'index.html'));
+  });
+
+  // Browsers perform their own update checks for this file, so it must not be
+  // held by an intermediary or the regular static-file cache.
+  app.get('/service-worker.js', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.setHeader('Service-Worker-Allowed', '/');
+    res.sendFile(path.join(publicDirectory, 'service-worker.js'));
+  });
+
   app.use(express.static(publicDirectory, {
     maxAge: process.env.NODE_ENV === 'production' ? '1h' : 0,
     etag: true
