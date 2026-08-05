@@ -158,7 +158,7 @@ const Voice = {
     for (const seg of segments) {
       const { qty, query } = this.splitQty(seg);
       if (!query) continue;
-      const p = this.findProduct(query, Pos.products.filter(x => x.stock > 0));
+      const p = this.findProduct(query, Pos.products.filter(x => x.sourceType !== 'outsourced' || x.stock > 0));
       if (!p) { failed.push(query); continue; }
       if (p.saleMode === 'measured') {
         failed.push(`${p.name} — tap it to enter grams`);
@@ -166,7 +166,7 @@ const Voice = {
       }
       const n = Math.max(qty || 1, 1);
       const line = Pos.cart[p.id] || { product: p, qty: 0 };
-      line.qty = Math.min(line.qty + n, p.stock);
+      line.qty = p.sourceType === 'outsourced' ? Math.min(line.qty + n, p.stock) : line.qty + n;
       Pos.cart[p.id] = line;
       added.push(`${n} ${p.name}`);
     }

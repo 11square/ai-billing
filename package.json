@@ -10,6 +10,7 @@
     "migrate:vendor-ledger": "node scripts/migrate-vendor-ledger.js",
     "migrate:raw-materials": "node scripts/migrate-raw-materials.js",
     "migrate:boq-inventory": "node scripts/migrate-boq-inventory.js",
+    "migrate:made-to-order": "node scripts/migrate-made-to-order.js",
     "migrate:grocery": "node scripts/migrate-grocery-schema.js",
     "seed": "node seed.js",
     "seed:demo": "node seed-demo.js"

@@ -6,6 +6,7 @@ const { Customer } = require('../models/Customer');
 const GroceryProduct = require('../models/GroceryProduct');
 const FertilizerProduct = require('../models/FertilizerProduct');
 const { auth } = require('../middleware/auth');
+const { consumeRecipe, restoreRecipe, reverseRecordedConsumption, recipeQuantity } = require('../services/rawMaterialService');
 
 const router = express.Router();
 
@@ -146,7 +147,7 @@ router.post('/', auth, async (req, res) => {
       const itemGst = (item.quantity * item.unitPrice) * (item.gstRate / 100);
       const totalPrice = (item.quantity * item.unitPrice) + itemGst;
 
-      await InvoiceItem.create({
+      const invoiceItem = await InvoiceItem.create({
         invoiceId: invoice.id,
         productType: shopType,
         productId: item.productId,
@@ -159,13 +160,28 @@ router.post('/', auth, async (req, res) => {
         totalPrice
       }, { transaction: t });
 
-      // Update product stock
+      // Purchased products use finished stock. Own-made products consume their recipe at billing.
       if (shopType === 'grocery') {
-        await GroceryProduct.decrement('stock', {
-          by: item.quantity,
-          where: { id: item.productId },
-          transaction: t
-        });
+        const product = await GroceryProduct.findByPk(item.productId, { transaction: t, lock: t.LOCK.UPDATE });
+        if (!product || !product.isActive) throw new Error(`${item.productName} is no longer available`);
+        if (product.sourceType !== 'outsourced') {
+          const consumption = await consumeRecipe({
+            product,
+            quantity: recipeQuantity(product, item.quantity),
+            shopType,
+            userId: req.user.id,
+            transaction: t,
+            referenceType: 'invoice_item',
+            referenceId: invoiceItem.id,
+            notes: `Billed ${item.quantity} ${item.unit || product.unit} of ${product.name}`
+          });
+          await product.update({ stock: 0, minStock: 0, purchasePrice: consumption.unitProductionCost }, { transaction: t });
+        } else {
+          if (Number(product.stock) + 0.0001 < Number(item.quantity)) {
+            throw new Error(`Only ${product.stock} ${product.unit} of ${product.name} is in stock`);
+          }
+          await product.decrement('stock', { by: item.quantity, transaction: t });
+        }
       } 
        else {
         const product = await FertilizerProduct.findByPk(item.productId, { transaction: t });
@@ -249,7 +265,8 @@ router.post('/', auth, async (req, res) => {
     res.status(201).json(result);
   } catch (error) {
     await t.rollback();
-    res.status(500).json({ message: error.message });
+    const status = /short by|recipe|Raw material|Inventory item|Cannot convert|Link recipe|no longer available|is in stock/i.test(error.message) ? 400 : 500;
+    res.status(status).json({ message: error.message });
   }
 });
 
@@ -324,15 +341,17 @@ router.put('/:id/items', auth, async (req, res) => {
         error.status = 400;
         throw error;
       }
-      const stockAfterEdit = Number(product.stock) + edit.oldQuantity - edit.newQuantity;
-      if (stockAfterEdit < 0) {
-        const available = Number(product.stock) + edit.oldQuantity;
-        const error = new Error(`Only ${available} × ${edit.item.productName} can be kept on this invoice`);
-        error.status = 400;
-        throw error;
+      if (product.sourceType === 'outsourced') {
+        const stockAfterEdit = Number(product.stock) + edit.oldQuantity - edit.newQuantity;
+        if (stockAfterEdit < 0) {
+          const available = Number(product.stock) + edit.oldQuantity;
+          const error = new Error(`Only ${available} × ${edit.item.productName} can be kept on this invoice`);
+          error.status = 400;
+          throw error;
+        }
+        edit.stockAfterEdit = stockAfterEdit;
       }
       edit.product = product;
-      edit.stockAfterEdit = stockAfterEdit;
     }
 
     let subTotal = 0;
@@ -370,7 +389,36 @@ router.put('/:id/items', auth, async (req, res) => {
 
     for (const edit of edits) {
       if (edit.newQuantity === edit.oldQuantity) continue;
-      await edit.product.update({ stock: edit.stockAfterEdit }, { transaction: t });
+      if (edit.product.sourceType !== 'outsourced') {
+        const difference = edit.newQuantity - edit.oldQuantity;
+        if (difference > 0) {
+          await consumeRecipe({
+            product: edit.product,
+            quantity: recipeQuantity(edit.product, difference),
+            shopType: invoice.shopType,
+            userId: req.user.id,
+            transaction: t,
+            referenceType: 'invoice_item',
+            referenceId: edit.item.id,
+            notes: `Invoice edit added ${difference} ${edit.item.unit || edit.product.unit} of ${edit.product.name}`
+          });
+        } else {
+          await restoreRecipe({
+            product: edit.product,
+            quantity: recipeQuantity(edit.product, Math.abs(difference)),
+            shopType: invoice.shopType,
+            userId: req.user.id,
+            transaction: t,
+            referenceType: 'invoice_item',
+            referenceId: edit.item.id,
+            notes: `Invoice edit returned ${Math.abs(difference)} ${edit.item.unit || edit.product.unit} of ${edit.product.name}`,
+            capToRecorded: true
+          });
+        }
+        await edit.product.update({ stock: 0, minStock: 0 }, { transaction: t });
+      } else {
+        await edit.product.update({ stock: edit.stockAfterEdit }, { transaction: t });
+      }
       if (edit.newQuantity === 0) {
         await edit.item.destroy({ transaction: t });
       } else {
@@ -411,7 +459,8 @@ router.put('/:id/items', auth, async (req, res) => {
     res.json(result);
   } catch (error) {
     await t.rollback();
-    res.status(error.status || 500).json({ message: error.message });
+    const isInventoryError = /short by|recipe|Raw material|Inventory item|Cannot convert|Link recipe/i.test(error.message);
+    res.status(error.status || (isInventoryError ? 400 : 500)).json({ message: error.message });
   }
 });
 
@@ -478,7 +527,9 @@ router.post('/:id/cancel', auth, async (req, res) => {
 
   try {
     const invoice = await Invoice.findByPk(req.params.id, {
-      include: [{ model: InvoiceItem, as: 'items' }]
+      include: [{ model: InvoiceItem, as: 'items' }],
+      transaction: t,
+      lock: t.LOCK.UPDATE
     });
 
     if (!invoice) {
@@ -489,14 +540,13 @@ router.post('/:id/cancel', auth, async (req, res) => {
       return res.status(400).json({ message: 'Invoice already cancelled' });
     }
 
-    // revert stock
+    // Restore purchased stock or the raw materials consumed for made-to-order items.
     for (const item of invoice.items) {
       if (invoice.shopType === 'grocery') {
-        await GroceryProduct.increment('stock', {
-          by: item.quantity,
-          where: { id: item.productId },
-          transaction: t
-        });
+        const product = await GroceryProduct.findByPk(item.productId, { transaction: t, lock: t.LOCK.UPDATE });
+        if (product?.sourceType === 'outsourced') {
+          await GroceryProduct.increment('stock', { by: item.quantity, where: { id: item.productId }, transaction: t });
+        }
       } else {
         const product = await FertilizerProduct.findByPk(item.productId, { transaction: t });
         if (product) {
@@ -509,6 +559,18 @@ router.post('/:id/cancel', auth, async (req, res) => {
           }
         }
       }
+    }
+    if (invoice.shopType === 'grocery') {
+      await reverseRecordedConsumption({
+        referenceType: 'invoice_item',
+        referenceIds: invoice.items.map(item => item.id),
+        shopType: invoice.shopType,
+        userId: req.user.id,
+        transaction: t,
+        reversalType: 'invoice_cancel',
+        reversalId: invoice.id,
+        notes: `Cancelled ${invoice.invoiceNumber}`
+      });
     }
 
     // revert customer stats

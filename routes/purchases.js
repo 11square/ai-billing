@@ -173,19 +173,16 @@ router.post('/', auth, async (req, res) => {
                     }, { transaction: t });
                 } else if (item.productId) {
                     if (req.user.activeShop === 'grocery') {
-                        await GroceryProduct.increment('stock', {
-                            by: item.quantity,
-                            where: { id: item.productId },
-                            transaction: t
-                        });
-                        await GroceryProduct.update({
+                        const product = await GroceryProduct.findByPk(item.productId, { transaction: t, lock: t.LOCK.UPDATE });
+                        if (!product || product.sourceType !== 'outsourced') {
+                            throw new Error(`${item.name} is made to order and cannot be added as finished stock`);
+                        }
+                        await product.increment('stock', { by: item.quantity, transaction: t });
+                        await product.update({
                             purchasePrice: item.cost,
                             sellingPrice: item.sellingPrice,
                             mrp: item.mrp
-                        }, {
-                            where: { id: item.productId },
-                            transaction: t
-                        });
+                        }, { transaction: t });
                     } else {
                         await FertilizerProduct.increment('stock', {
                             by: item.quantity,
@@ -250,7 +247,8 @@ router.post('/', auth, async (req, res) => {
     } catch (error) {
         await t.rollback();
         console.error('Error creating purchase:', error);
-        res.status(500).json({ message: 'Server error', error: error.message });
+        const status = /made to order|cannot be added as finished stock/i.test(error.message) ? 400 : 500;
+        res.status(status).json({ message: status === 400 ? error.message : 'Server error', error: error.message });
     }
 });
 
@@ -348,11 +346,8 @@ router.delete('/:id', auth, async (req, res) => {
                 }
             } else if (item.productId) {
                 if (purchase.shopType === 'grocery') {
-                    await GroceryProduct.decrement('stock', {
-                        by: item.quantity,
-                        where: { id: item.productId },
-                        transaction: t
-                    });
+                    const product = await GroceryProduct.findByPk(item.productId, { transaction: t, lock: t.LOCK.UPDATE });
+                    if (product?.sourceType === 'outsourced') await product.decrement('stock', { by: item.quantity, transaction: t });
                 } else {
                     await FertilizerProduct.decrement('stock', {
                         by: item.quantity,

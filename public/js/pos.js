@@ -100,8 +100,9 @@ const Pos = {
     grid.innerHTML = items.map(p => {
       const inCart = this.cart[p.id]?.qty || 0;
       const measured = p.saleMode === 'measured';
-      const oos = p.stock <= 0;
-      const stockCls = oos ? 'out' : (p.stock <= p.minStock ? 'low' : '');
+      const madeToOrder = p.sourceType !== 'outsourced';
+      const oos = !madeToOrder && p.stock <= 0;
+      const stockCls = madeToOrder ? '' : (oos ? 'out' : (p.stock <= p.minStock ? 'low' : ''));
       return `
         <div class="item-card ${oos ? 'oos' : ''}" data-id="${p.id}">
           ${inCart ? `<div class="item-qty-badge">${inCart}${measured ? 'g' : ''}</div>` : ''}
@@ -110,7 +111,7 @@ const Pos = {
             <div class="item-name">${Ui.esc(p.name)}</div>
             <div class="item-meta">
               <span class="item-price">${Ui.fmt(p.sellingPrice)}${measured ? '<small>/kg</small>' : ''}</span>
-              <span class="item-stock ${stockCls}">${oos ? 'Sold out' : measured ? `${p.stock}g left` : `${p.stock} left`}</span>
+              <span class="item-stock ${stockCls}">${madeToOrder ? 'Made to order' : (oos ? 'Sold out' : measured ? `${p.stock}g left` : `${p.stock} left`)}</span>
             </div>
           </div>
         </div>`;
@@ -122,13 +123,13 @@ const Pos = {
 
   addToCart(id) {
     const p = this.products.find(x => x.id === id);
-    if (!p || p.stock <= 0) return;
+    if (!p || (p.sourceType === 'outsourced' && p.stock <= 0)) return;
     if (p.saleMode === 'measured') {
       this.openWeightEntry(p);
       return;
     }
     const line = this.cart[id] || { product: p, qty: 0 };
-    if (line.qty >= p.stock) { Ui.toast(`Only ${p.stock} × ${p.name} in stock`, 'error'); return; }
+    if (p.sourceType === 'outsourced' && line.qty >= p.stock) { Ui.toast(`Only ${p.stock} × ${p.name} in stock`, 'error'); return; }
     line.qty++;
     this.cart[id] = line;
     this.renderCart();
@@ -137,19 +138,20 @@ const Pos = {
 
   openWeightEntry(p) {
     const currentGrams = this.cart[p.id]?.qty || 0;
+    const madeToOrder = p.sourceType !== 'outsourced';
     const m = Ui.modal({
       title: `Enter weight · ${Ui.esc(p.name)}`,
       body: `
         <div class="weight-product-summary">
           ${Ui.imgTag(p.image, p.category, '')}
-          <div><b>${Ui.esc(p.name)}</b><span>${Ui.fmt(p.sellingPrice)} per kg · ${p.stock} g available</span></div>
+          <div><b>${Ui.esc(p.name)}</b><span>${Ui.fmt(p.sellingPrice)} per kg · ${madeToOrder ? 'made to order' : `${p.stock} g available`}</span></div>
         </div>
         <div class="field">
           <label>Weight in grams *</label>
-          <div class="weight-input-wrap"><input id="weight-grams" type="number" min="1" max="${p.stock}" step="1" value="${currentGrams || ''}" placeholder="e.g. 250" inputmode="numeric"/><span>g</span></div>
+          <div class="weight-input-wrap"><input id="weight-grams" type="number" min="1" ${madeToOrder ? '' : `max="${p.stock}"`} step="1" value="${currentGrams || ''}" placeholder="e.g. 250" inputmode="numeric"/><span>g</span></div>
         </div>
         <div class="weight-quick">
-          ${[100, 250, 500, 1000].filter(grams => grams <= p.stock).map(grams => `<button type="button" class="quick-amt" data-grams="${grams}">${grams === 1000 ? '1 kg' : `${grams} g`}</button>`).join('')}
+          ${[100, 250, 500, 1000].filter(grams => madeToOrder || grams <= p.stock).map(grams => `<button type="button" class="quick-amt" data-grams="${grams}">${grams === 1000 ? '1 kg' : `${grams} g`}</button>`).join('')}
         </div>
         <div class="pay-summary weight-price-preview">
           <span>Price for this weight</span><strong id="weight-price">${Ui.fmt(0)}</strong>
@@ -180,7 +182,7 @@ const Pos = {
     m.el.querySelector('#weight-add').addEventListener('click', () => {
       const grams = Math.round(Number(input.value));
       if (!grams || grams <= 0) { Ui.toast('Enter the weight in grams', 'error'); return; }
-      if (grams > p.stock) { Ui.toast(`Only ${p.stock} g available`, 'error'); return; }
+      if (!madeToOrder && grams > p.stock) { Ui.toast(`Only ${p.stock} g available`, 'error'); return; }
       this.cart[p.id] = { product: p, qty: grams };
       m.close();
       this.renderCart();
@@ -193,7 +195,7 @@ const Pos = {
     const line = this.cart[id];
     if (!line) return;
     line.qty += delta;
-    if (line.qty > line.product.stock) { line.qty = line.product.stock; Ui.toast('Reached available stock', 'error'); }
+    if (line.product.sourceType === 'outsourced' && line.qty > line.product.stock) { line.qty = line.product.stock; Ui.toast('Reached available stock', 'error'); }
     if (line.qty <= 0) delete this.cart[id];
     this.renderCart();
     this.renderGrid();

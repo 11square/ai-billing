@@ -91,11 +91,12 @@ async function computeSummary(start, end) {
 
     // BOQ consumption = boq per unit × units sold (own products only)
     if (source === 'own' && product && Array.isArray(product.boq)) {
+      const recipeMultiplier = product.saleMode === 'measured' ? sold.qty / 1000 : sold.qty;
       for (const line of product.boq) {
         if (!line || !line.ingredient) continue;
         const key = `${String(line.ingredient).trim().toLowerCase()}|${(line.unit || '').trim().toLowerCase()}`;
         const prev = boqTotals.get(key) || { ingredient: String(line.ingredient).trim(), unit: (line.unit || '').trim(), qty: 0 };
-        prev.qty += (parseFloat(line.qty) || 0) * sold.qty;
+        prev.qty += (parseFloat(line.qty) || 0) * recipeMultiplier;
         boqTotals.set(key, prev);
       }
     }

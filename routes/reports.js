@@ -182,7 +182,7 @@ router.get('/stock', auth, async (req, res) => {
 
     if (!shopType || shopType === 'grocery') {
       const groceryProducts = await GroceryProduct.findAll({
-        where: { isActive: true }
+        where: { isActive: true, sourceType: 'outsourced' }
       });
       products = products.concat(groceryProducts.map(p => ({
         ...p.toJSON(),
@@ -424,7 +424,7 @@ router.get('/dashboard', auth, async (req, res) => {
     try {
       if (!shopType || shopType === 'grocery') {
         const groceryProducts = await GroceryProduct.findAll({
-          where: { isActive: true }
+          where: { isActive: true, sourceType: 'outsourced' }
         });
         lowStockCount += groceryProducts.filter(p => p.stock <= p.minStock).length;
         stockValue += groceryProducts.reduce((sum, p) => sum + (Number(p.stock) * Number(p.purchasePrice || 0)), 0);

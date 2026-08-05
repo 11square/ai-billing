@@ -43,7 +43,8 @@ const Menu = {
       return;
     }
     grid.innerHTML = items.map(p => {
-      const stockCls = p.stock <= 0 ? 'out' : (p.stock <= p.minStock ? 'low' : '');
+      const madeToOrder = p.sourceType !== 'outsourced';
+      const stockCls = madeToOrder ? '' : (p.stock <= 0 ? 'out' : (p.stock <= p.minStock ? 'low' : ''));
       const measured = p.saleMode === 'measured';
       return `
       <div class="menu-card">
@@ -53,7 +54,7 @@ const Menu = {
           <div class="mc-name">${Ui.esc(p.name)}</div>
           <div class="mc-row">
             <span class="item-price">${Ui.fmt(p.sellingPrice)} <span class="muted" style="font-size:11px">/ ${measured ? 'kg' : Ui.esc(p.unit)}</span></span>
-            <span class="item-stock ${stockCls}">${p.stock <= 0 ? 'Out of stock' : measured ? `${p.stock} g in stock` : `${p.stock} in stock`}</span>
+            <span class="item-stock ${stockCls}">${madeToOrder ? 'Made to order' : (p.stock <= 0 ? 'Out of stock' : measured ? `${p.stock} g in stock` : `${p.stock} in stock`)}</span>
           </div>
           <div class="mc-row">
             <span class="src-badge ${p.sourceType === 'outsourced' ? 'out' : 'own'}">${p.sourceType === 'outsourced' ? '🚚 Outsourced' : '🏭 Own'}</span>
@@ -61,7 +62,7 @@ const Menu = {
           </div>
           <div class="mc-actions">
             <button class="btn btn-ghost btn-sm" data-act="edit" data-id="${p.id}">✏️ Edit</button>
-            <button class="btn btn-ghost btn-sm" data-act="restock" data-id="${p.id}">📦 Restock</button>
+            ${madeToOrder ? '' : `<button class="btn btn-ghost btn-sm" data-act="restock" data-id="${p.id}">📦 Restock</button>`}
             <button class="btn btn-danger btn-sm" data-act="del" data-id="${p.id}" style="flex:0 0 auto">🗑</button>
           </div>
         </div>
@@ -106,8 +107,8 @@ const Menu = {
           <div class="field"><label id="mf-price-label">Selling price ₹ *</label><input id="mf-price" type="number" min="0" step="0.01" value="${p?.sellingPrice || ''}"/></div>
           <div class="field"><label>MRP ₹</label><input id="mf-mrp" type="number" min="0" step="0.01" value="${p?.mrp || ''}"/></div>
           <div class="field"><label>Cost price ₹ *</label><input id="mf-cost" type="number" min="0" step="0.01" value="${p?.purchasePrice || ''}"/></div>
-          <div class="field"><label id="mf-stock-label">${isEdit ? 'Current stock (use Restock to change)' : 'Opening stock'}</label><input id="mf-stock" type="number" min="0" value="${isEdit ? p.stock : 0}" ${isEdit ? 'disabled' : ''}/></div>
-          <div class="field"><label id="mf-minstock-label">Low-stock alert at</label><input id="mf-minstock" type="number" min="0" value="${p?.minStock ?? 10}"/></div>
+          <div class="field" id="mf-stock-field"><label id="mf-stock-label">${isEdit ? 'Current stock (use Restock to change)' : 'Opening stock'}</label><input id="mf-stock" type="number" min="0" value="${isEdit ? p.stock : 0}" ${isEdit ? 'disabled' : ''}/></div>
+          <div class="field" id="mf-minstock-field"><label id="mf-minstock-label">Low-stock alert at</label><input id="mf-minstock" type="number" min="0" value="${p?.minStock ?? 10}"/></div>
           <div class="field ${isEdit ? '' : 'full'}"><label>Barcode (optional)</label><input id="mf-barcode" value="${Ui.esc(p?.barcode || '')}"/></div>
           <div class="field full">
             <label>Product image ${isEdit ? '(optional — choose to replace)' : '*'}</label>
@@ -124,7 +125,7 @@ const Menu = {
           <div class="field full"><label>Description</label><textarea id="mf-desc" rows="2">${Ui.esc(p?.description || '')}</textarea></div>
           <div class="field full"><label>Source *</label>
             <select id="mf-source">
-              <option value="own" ${(p?.sourceType || 'own') === 'own' ? 'selected' : ''}>🏭 Own — manufactured by us</option>
+              <option value="own" ${(p?.sourceType || 'own') === 'own' ? 'selected' : ''}>🏭 Own — made to order</option>
               <option value="outsourced" ${p?.sourceType === 'outsourced' ? 'selected' : ''}>🚚 Outsourced — purchased from vendor</option>
             </select>
           </div>
@@ -320,9 +321,14 @@ const Menu = {
       const own = $('#mf-source').value === 'own';
       $('#mf-boq-wrap').style.display = own ? '' : 'none';
       $('#mf-out-hint').style.display = own ? 'none' : '';
+      $('#mf-stock-field').style.display = own ? 'none' : '';
+      $('#mf-minstock-field').style.display = own ? 'none' : '';
+      if (own) {
+        $('#mf-stock').value = 0;
+        $('#mf-minstock').value = 0;
+      }
       if (!isEdit) {
         $('#mf-stock').disabled = own;
-        if (own) $('#mf-stock').value = 0;
       }
     };
     syncSource();
@@ -350,7 +356,7 @@ const Menu = {
         mrp: parseFloat($('#mf-mrp').value) || parseFloat($('#mf-price').value),
         purchasePrice: parseFloat($('#mf-cost').value),
         gstRate: 0,
-        minStock: parseInt($('#mf-minstock').value) || 0,
+        minStock: $('#mf-source').value === 'own' ? 0 : (parseInt($('#mf-minstock').value) || 0),
         barcode: $('#mf-barcode').value.trim() || undefined,
         description: $('#mf-desc').value.trim() || null,
         sourceType: $('#mf-source').value
@@ -387,10 +393,7 @@ const Menu = {
       try {
         if (isEdit) await Api.put(`/grocery/${p.id}`, body);
         else {
-          const saved = await Api.post('/grocery', body);
-          if (body.sourceType === 'own' && openingStock > 0) {
-            await Api.put(`/grocery/${saved.id}/restock`, { quantity: openingStock });
-          }
+          await Api.post('/grocery', body);
         }
         Ui.toast(isEdit ? 'Item updated' : 'Item added to menu');
         m.close();
@@ -401,7 +404,7 @@ const Menu = {
 
   openRestock(p) {
     if (p.sourceType === 'own') {
-      Stock._restock(p, () => this.render(document.getElementById('page')));
+      Ui.toast('Own-made items are made to order; update their recipe or raw-material inventory instead.', 'info');
       return;
     }
     const measured = p.saleMode === 'measured';

@@ -3,7 +3,6 @@ const { Op } = require('sequelize');
 const GroceryProduct = require('../models/GroceryProduct');
 const sequelize = require('../config/database');
 const { auth } = require('../middleware/auth');
-const { consumeRecipe } = require('../services/rawMaterialService');
 const {
   decodeProductImage,
   downloadProductImage,
@@ -39,7 +38,7 @@ router.get('/', auth, async (req, res) => {
 
     let result = products;
     if (lowStock === 'true') {
-      result = products.filter(p => p.stock <= p.minStock);
+      result = products.filter(p => p.sourceType === 'outsourced' && p.stock <= p.minStock);
     }
 
     res.json({ products: result, total: result.length });
@@ -88,6 +87,10 @@ router.post('/', auth, async (req, res) => {
       ? decodeProductImage(req.body.imageData)
       : await downloadProductImage(req.body.imageUrl);
     const productData = { ...req.body, image: null };
+    if ((productData.sourceType || 'own') === 'own') {
+      productData.stock = 0;
+      productData.minStock = 0;
+    }
     delete productData.imageData;
     delete productData.imageUrl;
     product = await GroceryProduct.create(productData);
@@ -118,6 +121,10 @@ router.put('/:id', auth, async (req, res) => {
     delete productData.imageData;
     delete productData.imageUrl;
     delete productData.image;
+    if ((productData.sourceType || product.sourceType) === 'own') {
+      productData.stock = 0;
+      productData.minStock = 0;
+    }
     const previousImage = product.image;
     if (imageData) {
       savedImage = await saveProductImage(product.id, imageData);
@@ -134,7 +141,7 @@ router.put('/:id', auth, async (req, res) => {
 });
 
 // @route   PUT /api/grocery/:id/restock
-// Adds quantity and optionally updates prices
+// Adds finished stock for purchased/resale products and optionally updates prices.
 router.put('/:id/restock', auth, async (req, res) => {
   const transaction = await sequelize.transaction();
   try {
@@ -151,16 +158,9 @@ router.put('/:id/restock', auth, async (req, res) => {
       return res.status(400).json({ message: 'Quantity must be greater than 0' });
     }
 
-    let production = null;
-    if (product.sourceType === 'own') {
-      const recipeMultiplier = product.saleMode === 'measured' ? Number(quantity) / 1000 : Number(quantity);
-      production = await consumeRecipe({
-        product,
-        quantity: recipeMultiplier,
-        shopType: req.user.activeShop,
-        userId: req.user.id,
-        transaction
-      });
+    if (product.sourceType !== 'outsourced') {
+      await transaction.rollback();
+      return res.status(400).json({ message: 'Own-made items are made to order. Their raw materials are deducted when billed.' });
     }
 
     // Build update object
@@ -171,8 +171,6 @@ router.put('/:id/restock', auth, async (req, res) => {
     // Only update prices if provided
     if (purchasePrice !== undefined) {
       updateData.purchasePrice = parseFloat(purchasePrice);
-    } else if (production) {
-      updateData.purchasePrice = production.unitProductionCost;
     }
     if (sellingPrice !== undefined) {
       updateData.sellingPrice = parseFloat(sellingPrice);
@@ -187,14 +185,11 @@ router.put('/:id/restock', auth, async (req, res) => {
       message: 'Product restocked successfully',
       product,
       addedQuantity: quantity,
-      newStock: product.stock,
-      rawMaterialsConsumed: production ? production.consumed : 0,
-      unitProductionCost: production ? production.unitProductionCost : null
+      newStock: product.stock
     });
   } catch (error) {
     await transaction.rollback();
-    const status = /short by|recipe|Raw material|Cannot convert|Link recipe/i.test(error.message) ? 400 : 500;
-    res.status(status).json({ message: error.message });
+    res.status(500).json({ message: error.message });
   }
 });
 

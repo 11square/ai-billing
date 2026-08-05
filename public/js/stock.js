@@ -5,10 +5,8 @@ const Stock = {
   rawMaterials: [],
   vendors: [],
   purchases: [],
-  sourceFilter: 'all',
 
   render(el) {
-    this.sourceFilter = 'all';
     el.innerHTML = `
       <div class="rep-tabs" id="stk-tabs">
         <button class="rep-tab ${this.tab === 'stock' ? 'active' : ''}" data-t="stock">📦 Stock Overview</button>
@@ -40,11 +38,11 @@ const Stock = {
     box.innerHTML = '<div class="loader"></div>';
     try {
       const res = await Api.get('/grocery');
-      this.products = res.products || [];
+      this.products = (res.products || []).filter(product => product.sourceType === 'outsourced');
     } catch (e) { box.innerHTML = `<div class="empty-state">${Ui.esc(e.message)}</div>`; return; }
 
     const render = () => {
-      const items = this.products.filter(p => this.sourceFilter === 'all' || (p.sourceType || 'own') === this.sourceFilter);
+      const items = this.products;
       const rows = items.map(p => {
         const measured = p.saleMode === 'measured';
         const st = p.stock <= 0 ? '<span class="badge unpaid">Out of stock</span>'
@@ -70,7 +68,7 @@ const Stock = {
         <table class="tbl">
           <thead><tr><th>Item</th><th>Source</th><th>Stock</th><th>Alert</th><th>Cost</th><th>Status</th><th style="text-align:right">Action</th></tr></thead>
           <tbody>${rows}</tbody>
-        </table>` : '<div class="empty-state"><div class="big">📦</div>No items for this filter</div>';
+        </table>` : '<div class="empty-state"><div class="big">📦</div><h3>No purchased stock items</h3><p>Own-made menu items are made to order and consume ingredients from Inventory when billed.</p></div>';
 
       document.querySelectorAll('#stk-table [data-po]').forEach(b => b.addEventListener('click', () => {
         const p = this.products.find(x => x.id === parseInt(b.dataset.po));
@@ -83,32 +81,32 @@ const Stock = {
       }));
     };
 
-    const low = this.products.filter(p => p.stock <= p.minStock).length;
-    const outsourcedCount = this.products.filter(p => (p.sourceType || 'own') === 'outsourced').length;
+    const low = this.products.filter(p => p.stock > 0 && p.stock <= p.minStock).length;
+    const out = this.products.filter(p => p.stock <= 0).length;
+    const stockValue = this.products.reduce((sum, product) => sum + Number(product.stock) * Number(product.purchasePrice || 0), 0);
     box.innerHTML = `
       <div class="stat-grid">
-        <div class="stat-card"><div class="stat-ic" style="background:var(--blue-soft)">🍽️</div><div class="stat-val">${this.products.length}</div><div class="stat-lbl">Total Items</div></div>
-        <div class="stat-card"><div class="stat-ic" style="background:var(--brand-soft)">🚚</div><div class="stat-val">${outsourcedCount}</div><div class="stat-lbl">Outsourced</div></div>
-        <div class="stat-card"><div class="stat-ic" style="background:var(--green-soft)">🏭</div><div class="stat-val">${this.products.length - outsourcedCount}</div><div class="stat-lbl">Own Made</div></div>
-        <div class="stat-card"><div class="stat-ic" style="background:var(--amber-soft)">⚠️</div><div class="stat-val">${low}</div><div class="stat-lbl">Low / Out of Stock</div></div>
+        <div class="stat-card"><div class="stat-ic" style="background:var(--blue-soft)">📦</div><div class="stat-val">${this.products.length}</div><div class="stat-lbl">Stocked Items</div></div>
+        <div class="stat-card"><div class="stat-ic" style="background:var(--green-soft)">₹</div><div class="stat-val">${Ui.fmt(stockValue)}</div><div class="stat-lbl">Stock Value</div></div>
+        <div class="stat-card"><div class="stat-ic" style="background:var(--amber-soft)">⚠️</div><div class="stat-val">${low}</div><div class="stat-lbl">Low Stock</div></div>
+        <div class="stat-card"><div class="stat-ic" style="background:var(--red-soft)">0</div><div class="stat-val">${out}</div><div class="stat-lbl">Out of Stock</div></div>
       </div>
       <div class="toolbar">
-        ${['all', 'outsourced', 'own'].map(f => `<button class="cat-chip ${this.sourceFilter === f ? 'active' : ''}" data-f="${f}">${f === 'outsourced' ? '🚚 Outsourced' : f === 'own' ? '🏭 Own' : '📦 All Items'}</button>`).join('')}
+        <div class="muted" style="font-weight:600">Purchased and resale items only. Own-made items use Inventory ingredients when billed.</div>
         <div class="spacer"></div>
         <button class="btn btn-primary" id="stk-new-po"><span data-icon="plus"></span> New Purchase Order</button>
       </div>
       <div class="card" style="padding:8px 6px"><div id="stk-table"></div></div>`;
     Ui.hydrateIcons(box);
-    box.querySelectorAll('[data-f]').forEach(b => b.addEventListener('click', () => {
-      this.sourceFilter = b.dataset.f;
-      box.querySelectorAll('[data-f]').forEach(x => x.classList.toggle('active', x === b));
-      render();
-    }));
     box.querySelector('#stk-new-po').addEventListener('click', () => this.openPoForm());
     render();
   },
 
   _restock(p, onDone) {
+    if (p.sourceType === 'own') {
+      Ui.toast('Own-made items are made to order; update their Inventory ingredients instead.', 'info');
+      return;
+    }
     const measured = p.saleMode === 'measured';
     const m = Ui.modal({
       title: `Restock · ${Ui.esc(p.name)}`,
@@ -188,7 +186,7 @@ const Stock = {
     } catch (e) { Ui.toast(e.message, 'error'); return; }
 
     const outsourced = this.products.filter(p => (p.sourceType || 'own') === 'outsourced');
-    const productPool = outsourced.length ? outsourced : this.products;
+    const productPool = outsourced;
     const pool = [
       ...productPool.map(product => ({ ...product, itemKind: 'product', itemKey: `product:${product.id}` })),
       ...this.rawMaterials.map(material => ({
