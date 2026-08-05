@@ -5,9 +5,10 @@ const Stock = {
   rawMaterials: [],
   vendors: [],
   purchases: [],
-  sourceFilter: 'outsourced',
+  sourceFilter: 'all',
 
   render(el) {
+    this.sourceFilter = 'all';
     el.innerHTML = `
       <div class="rep-tabs" id="stk-tabs">
         <button class="rep-tab ${this.tab === 'stock' ? 'active' : ''}" data-t="stock">📦 Stock Overview</button>
@@ -92,7 +93,7 @@ const Stock = {
         <div class="stat-card"><div class="stat-ic" style="background:var(--amber-soft)">⚠️</div><div class="stat-val">${low}</div><div class="stat-lbl">Low / Out of Stock</div></div>
       </div>
       <div class="toolbar">
-        ${['outsourced', 'own', 'all'].map(f => `<button class="cat-chip ${this.sourceFilter === f ? 'active' : ''}" data-f="${f}">${f === 'outsourced' ? '🚚 Outsourced' : f === 'own' ? '🏭 Own' : 'All items'}</button>`).join('')}
+        ${['all', 'outsourced', 'own'].map(f => `<button class="cat-chip ${this.sourceFilter === f ? 'active' : ''}" data-f="${f}">${f === 'outsourced' ? '🚚 Outsourced' : f === 'own' ? '🏭 Own' : '📦 All Items'}</button>`).join('')}
         <div class="spacer"></div>
         <button class="btn btn-primary" id="stk-new-po"><span data-icon="plus"></span> New Purchase Order</button>
       </div>
