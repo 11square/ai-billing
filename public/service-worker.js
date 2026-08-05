@@ -1,10 +1,11 @@
-const CACHE_NAME = 'ai-bill-v2';
+const CACHE_NAME = 'ai-bill-v3';
 const APP_SHELL = [
   '/',
   '/css/style.css',
   '/images/ai-bill-logo.png',
   '/js/api.js',
   '/js/ui.js',
+  '/js/vendors.js',
   '/js/app.js'
 ];
 

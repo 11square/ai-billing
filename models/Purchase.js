@@ -24,6 +24,43 @@ const Vendor = sequelize.define('Vendor', {
     gstin: {
         type: DataTypes.STRING(20)
     },
+    contactPerson: {
+        type: DataTypes.STRING(100),
+        field: 'contact_person'
+    },
+    alternatePhone: {
+        type: DataTypes.STRING(20),
+        field: 'alternate_phone'
+    },
+    paymentTermsDays: {
+        type: DataTypes.INTEGER,
+        defaultValue: 0,
+        field: 'payment_terms_days'
+    },
+    bankName: {
+        type: DataTypes.STRING(100),
+        field: 'bank_name'
+    },
+    accountNumber: {
+        type: DataTypes.STRING(50),
+        field: 'account_number'
+    },
+    ifsc: {
+        type: DataTypes.STRING(20)
+    },
+    upiId: {
+        type: DataTypes.STRING(100),
+        field: 'upi_id'
+    },
+    notes: {
+        type: DataTypes.TEXT
+    },
+    isActive: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: true,
+        field: 'is_active'
+    },
     shopType: {
         type: DataTypes.ENUM('grocery', 'fertilizer'),
         allowNull: false,
@@ -92,6 +129,12 @@ const Purchase = sequelize.define('Purchase', {
         type: DataTypes.DECIMAL(12, 2),
         allowNull: false,
         field: 'grand_total'
+    },
+    paidAmount: {
+        type: DataTypes.DECIMAL(12, 2),
+        allowNull: false,
+        defaultValue: 0,
+        field: 'paid_amount'
     },
     status: {
         type: DataTypes.ENUM('pending', 'paid', 'partial'),

@@ -28,7 +28,7 @@ const Stock = {
     if (!box) return;
     if (this.tab === 'stock') this.stockTab(box);
     else if (this.tab === 'po') this.poTab(box);
-    else this.vendorsTab(box);
+    else location.hash = '#vendors';
   },
 
   // ---------- STOCK OVERVIEW ----------

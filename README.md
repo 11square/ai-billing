@@ -10,7 +10,8 @@ MySQL persistence through Sequelize.
 - Dashboard and sales summaries
 - POS billing and invoice generation
 - Grocery and fertilizer product modules
-- Menu, stock, purchase order, and vendor management
+- Menu, stock and purchase order management
+- Vendor master data, payable balances, purchase ledger, payments, debit notes and credit adjustments
 - Customer credit tracking
 - Staff and attendance management
 - Scheduled and on-demand reports

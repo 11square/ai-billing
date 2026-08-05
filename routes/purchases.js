@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { Vendor, Purchase, PurchaseItem } = require('../models/Purchase');
+const VendorLedgerEntry = require('../models/VendorLedgerEntry');
 const User = require('../models/User');
 const GroceryProduct = require('../models/GroceryProduct');
 const FertilizerProduct = require('../models/FertilizerProduct');
@@ -30,7 +31,8 @@ router.get('/', auth, async (req, res) => {
 // Get single purchase
 router.get('/:id', auth, async (req, res) => {
     try {
-        const purchase = await Purchase.findByPk(req.params.id, {
+        const purchase = await Purchase.findOne({
+            where: { id: req.params.id, shopType: req.user.activeShop },
             include: [
                 { model: PurchaseItem, as: 'items' },
                 { model: Vendor, as: 'vendor' },
@@ -67,13 +69,43 @@ router.post('/', auth, async (req, res) => {
             totalTax,
             discount,
             grandTotal,
-            status
+            status,
+            paidAmount
         } = req.body;
+
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(String(billDate || ''))) {
+            await t.rollback();
+            return res.status(400).json({ message: 'Enter a valid bill date' });
+        }
+        if (!Array.isArray(items) || !items.length) {
+            await t.rollback();
+            return res.status(400).json({ message: 'Add at least one purchase item' });
+        }
+
+        const vendor = await Vendor.findOne({
+            where: { id: vendorId, shopType: req.user.activeShop, isActive: true },
+            transaction: t,
+            lock: t.LOCK.UPDATE
+        });
+        if (!vendor) {
+            await t.rollback();
+            return res.status(400).json({ message: 'Select an active vendor' });
+        }
+
+        const purchaseTotal = Number(grandTotal);
+        if (!Number.isFinite(purchaseTotal) || purchaseTotal <= 0) {
+            await t.rollback();
+            return res.status(400).json({ message: 'Purchase total must be greater than zero' });
+        }
+        const initialPaid = status === 'paid'
+            ? purchaseTotal
+            : status === 'partial' ? Math.min(Math.max(Number(paidAmount) || 0, 0), purchaseTotal) : 0;
+        const purchaseStatus = initialPaid >= purchaseTotal ? 'paid' : initialPaid > 0 ? 'partial' : 'pending';
 
         // Create purchase
         const purchase = await Purchase.create({
-            vendorName,
-            vendorId: vendorId || null,
+            vendorName: vendor.name,
+            vendorId: vendor.id,
             invoiceNo: invoiceNo || null,
             vendorBillNo: vendorBillNo || null,
             billDate: new Date(billDate),
@@ -83,7 +115,8 @@ router.post('/', auth, async (req, res) => {
             totalTax: totalTax || 0,
             discount: discount || 0,
             grandTotal,
-            status: status || 'pending',
+            paidAmount: initialPaid,
+            status: purchaseStatus,
             shopType: req.user.activeShop,
             createdBy: req.user.id
         }, { transaction: t });
@@ -148,6 +181,35 @@ router.post('/', auth, async (req, res) => {
             }
         }
 
+        await VendorLedgerEntry.create({
+            vendorId: vendor.id,
+            purchaseId: purchase.id,
+            entryType: 'purchase',
+            direction: 'credit',
+            amount: purchaseTotal,
+            entryDate: String(billDate).slice(0, 10),
+            referenceNo: vendorBillNo || `PO-${String(purchase.id).padStart(4, '0')}`,
+            notes: `Purchase order PO-${String(purchase.id).padStart(4, '0')}`,
+            shopType: req.user.activeShop,
+            createdBy: req.user.id
+        }, { transaction: t });
+
+        if (initialPaid > 0) {
+            await VendorLedgerEntry.create({
+                vendorId: vendor.id,
+                purchaseId: purchase.id,
+                entryType: 'payment',
+                direction: 'debit',
+                amount: initialPaid,
+                entryDate: paymentDate ? String(paymentDate).slice(0, 10) : new Date().toISOString().slice(0, 10),
+                referenceNo: vendorBillNo || `PO-${String(purchase.id).padStart(4, '0')}`,
+                paymentMode: paymentMode === 'cash' ? 'cash' : 'online',
+                notes: 'Payment recorded with purchase',
+                shopType: req.user.activeShop,
+                createdBy: req.user.id
+            }, { transaction: t });
+        }
+
         await t.commit();
 
         // Fetch the complete purchase with items
@@ -169,17 +231,49 @@ router.post('/', auth, async (req, res) => {
 
 // Update purchase status
 router.patch('/:id/status', auth, async (req, res) => {
+    const t = await sequelize.transaction();
     try {
         const { status } = req.body;
 
-        const purchase = await Purchase.findByPk(req.params.id);
+        if (!['pending', 'partial', 'paid'].includes(status)) {
+            await t.rollback();
+            return res.status(400).json({ message: 'Invalid purchase status' });
+        }
+        const purchase = await Purchase.findOne({
+            where: { id: req.params.id, shopType: req.user.activeShop },
+            transaction: t,
+            lock: t.LOCK.UPDATE
+        });
         if (!purchase) {
+            await t.rollback();
             return res.status(404).json({ message: 'Purchase not found' });
         }
 
-        await purchase.update({ status });
+        if (status !== 'paid') {
+            await t.rollback();
+            return res.status(400).json({ message: 'Use vendor payments to record partial payments or corrections' });
+        }
+        const remaining = Math.max(0, Number(purchase.grandTotal) - Number(purchase.paidAmount || 0));
+        if (remaining > 0.009) {
+            await VendorLedgerEntry.create({
+                vendorId: purchase.vendorId,
+                purchaseId: purchase.id,
+                entryType: 'payment',
+                direction: 'debit',
+                amount: remaining,
+                entryDate: new Date().toISOString().slice(0, 10),
+                paymentMode: req.body.paymentMode || 'cash',
+                referenceNo: String(req.body.referenceNo || '').trim() || null,
+                notes: 'Purchase marked paid',
+                shopType: req.user.activeShop,
+                createdBy: req.user.id
+            }, { transaction: t });
+        }
+        await purchase.update({ status: 'paid', paidAmount: purchase.grandTotal, paymentDate: new Date() }, { transaction: t });
+        await t.commit();
         res.json(purchase);
     } catch (error) {
+        await t.rollback();
         console.error('Error updating purchase status:', error);
         res.status(500).json({ message: 'Server error' });
     }
@@ -190,7 +284,8 @@ router.delete('/:id', auth, async (req, res) => {
     const t = await sequelize.transaction();
 
     try {
-        const purchase = await Purchase.findByPk(req.params.id, {
+        const purchase = await Purchase.findOne({
+            where: { id: req.params.id, shopType: req.user.activeShop },
             include: [{ model: PurchaseItem, as: 'items' }]
         });
 
@@ -220,6 +315,11 @@ router.delete('/:id', auth, async (req, res) => {
 
         // Delete items
         await PurchaseItem.destroy({
+            where: { purchaseId: purchase.id },
+            transaction: t
+        });
+
+        await VendorLedgerEntry.destroy({
             where: { purchaseId: purchase.id },
             transaction: t
         });
