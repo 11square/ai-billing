@@ -1,7 +1,9 @@
 const express = require('express');
 const { Op } = require('sequelize');
 const GroceryProduct = require('../models/GroceryProduct');
+const sequelize = require('../config/database');
 const { auth } = require('../middleware/auth');
+const { consumeRecipe } = require('../services/rawMaterialService');
 const {
   decodeProductImage,
   downloadProductImage,
@@ -134,16 +136,31 @@ router.put('/:id', auth, async (req, res) => {
 // @route   PUT /api/grocery/:id/restock
 // Adds quantity and optionally updates prices
 router.put('/:id/restock', auth, async (req, res) => {
+  const transaction = await sequelize.transaction();
   try {
-    const product = await GroceryProduct.findByPk(req.params.id);
+    const product = await GroceryProduct.findByPk(req.params.id, { transaction, lock: transaction.LOCK.UPDATE });
     if (!product) {
+      await transaction.rollback();
       return res.status(404).json({ message: 'Product not found' });
     }
 
     const { quantity, purchasePrice, sellingPrice, mrp } = req.body;
 
     if (!quantity || quantity <= 0) {
+      await transaction.rollback();
       return res.status(400).json({ message: 'Quantity must be greater than 0' });
+    }
+
+    let production = null;
+    if (product.sourceType === 'own') {
+      const recipeMultiplier = product.saleMode === 'measured' ? Number(quantity) / 1000 : Number(quantity);
+      production = await consumeRecipe({
+        product,
+        quantity: recipeMultiplier,
+        shopType: req.user.activeShop,
+        userId: req.user.id,
+        transaction
+      });
     }
 
     // Build update object
@@ -154,6 +171,8 @@ router.put('/:id/restock', auth, async (req, res) => {
     // Only update prices if provided
     if (purchasePrice !== undefined) {
       updateData.purchasePrice = parseFloat(purchasePrice);
+    } else if (production) {
+      updateData.purchasePrice = production.unitProductionCost;
     }
     if (sellingPrice !== undefined) {
       updateData.sellingPrice = parseFloat(sellingPrice);
@@ -162,15 +181,20 @@ router.put('/:id/restock', auth, async (req, res) => {
       updateData.mrp = parseFloat(mrp);
     }
 
-    await product.update(updateData);
+    await product.update(updateData, { transaction });
+    await transaction.commit();
     res.json({
       message: 'Product restocked successfully',
       product,
       addedQuantity: quantity,
-      newStock: product.stock
+      newStock: product.stock,
+      rawMaterialsConsumed: production ? production.consumed : 0,
+      unitProductionCost: production ? production.unitProductionCost : null
     });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    await transaction.rollback();
+    const status = /short by|recipe|Raw material|Cannot convert|Link recipe/i.test(error.message) ? 400 : 500;
+    res.status(status).json({ message: error.message });
   }
 });
 

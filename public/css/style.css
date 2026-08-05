@@ -231,6 +231,10 @@ a { color: inherit; text-decoration: none; }
 .vendor-details-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .vendor-details-grid > div { display: grid; gap: 5px; padding: 12px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 11px; }
 .form-help { color: var(--ink-3); font-size: 12px; line-height: 1.5; padding: 10px 12px; background: var(--amber-soft); border-radius: 10px; }
+.raw-recipe-count { display: inline-flex; padding: 4px 9px; border-radius: 8px; background: var(--blue-soft); color: var(--blue); font-size: 11px; font-weight: 800; }
+.raw-history { max-height: 430px; overflow: auto; border: 1px solid var(--line); border-radius: 12px; }
+.raw-history .tbl { min-width: 720px; }
+.raw-history .tbl th { position: sticky; top: 0; z-index: 1; background: var(--surface); }
 
 /* ================= Toolbar / filters ================= */
 .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }

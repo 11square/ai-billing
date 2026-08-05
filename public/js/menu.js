@@ -76,10 +76,13 @@ const Menu = {
     }));
   },
 
-  openForm(p) {
+  async openForm(p) {
     const isEdit = !!p;
     const productUnits = ['piece', 'cup', 'plate', 'glass', 'pack', 'slice', 'cake', 'loaf', 'bottle', 'box', 'kg', 'g', 'L', 'ml'];
-    const ingredientUnits = ['g', 'kg', 'ml', 'L', 'piece', 'tsp', 'tbsp', 'cup'];
+    const ingredientUnits = ['g', 'kg', 'ml', 'L', 'piece', 'pack'];
+    let rawMaterials = [];
+    try { rawMaterials = (await Api.get('/raw-materials')).materials || []; }
+    catch (error) { Ui.toast(`Could not load raw materials: ${error.message}`, 'error'); }
     const unitOptions = (units, selected) => {
       const values = units.includes(selected) || !selected ? units : [selected, ...units];
       return values.map(unit => `<option value="${Ui.esc(unit)}" ${unit === selected ? 'selected' : ''}>${Ui.esc(unit)}</option>`).join('');
@@ -103,7 +106,7 @@ const Menu = {
           <div class="field"><label id="mf-price-label">Selling price ₹ *</label><input id="mf-price" type="number" min="0" step="0.01" value="${p?.sellingPrice || ''}"/></div>
           <div class="field"><label>MRP ₹</label><input id="mf-mrp" type="number" min="0" step="0.01" value="${p?.mrp || ''}"/></div>
           <div class="field"><label>Cost price ₹ *</label><input id="mf-cost" type="number" min="0" step="0.01" value="${p?.purchasePrice || ''}"/></div>
-          <div class="field"><label id="mf-stock-label">${isEdit ? 'Current stock' : 'Opening stock'}</label><input id="mf-stock" type="number" min="0" value="${isEdit ? p.stock : 0}"/></div>
+          <div class="field"><label id="mf-stock-label">${isEdit ? 'Current stock (use Restock to change)' : 'Opening stock'}</label><input id="mf-stock" type="number" min="0" value="${isEdit ? p.stock : 0}" ${isEdit ? 'disabled' : ''}/></div>
           <div class="field"><label id="mf-minstock-label">Low-stock alert at</label><input id="mf-minstock" type="number" min="0" value="${p?.minStock ?? 10}"/></div>
           <div class="field ${isEdit ? '' : 'full'}"><label>Barcode (optional)</label><input id="mf-barcode" value="${Ui.esc(p?.barcode || '')}"/></div>
           <div class="field full">
@@ -129,6 +132,7 @@ const Menu = {
             <label style="display:block;font-size:12.5px;font-weight:700;color:var(--ink-2);margin-bottom:6px">BOQ — Bill of Quantities (${p?.saleMode === 'measured' ? 'per 1 kg sold' : `per 1 ${Ui.esc(p?.unit || 'unit')} sold`})</label>
             <div id="mf-boq-rows"></div>
             <button type="button" class="btn btn-ghost btn-sm" id="mf-boq-add">+ Add ingredient</button>
+            <div class="pay-summary" style="margin-top:10px"><div class="tot-row"><span>Estimated raw-material cost</span><b id="mf-recipe-cost">${Ui.fmt(0)}</b></div></div>
           </div>
           <div class="full" id="mf-out-hint" style="display:none">
             <div class="pay-summary" style="margin-bottom:14px">🚚 Outsourced items are stocked through <b>Purchase Orders</b> — manage them in the <b>Stock &amp; PO</b> module.</div>
@@ -171,19 +175,43 @@ const Menu = {
 
     // ----- BOQ editor -----
     const boqRows = $('#mf-boq-rows');
+    const convertForCost = (quantity, from, to) => {
+      if (from === to) return quantity;
+      const factors = { 'kg:g': 1000, 'g:kg': 0.001, 'L:ml': 1000, 'ml:L': 0.001 };
+      return factors[`${from}:${to}`] ? quantity * factors[`${from}:${to}`] : 0;
+    };
+    const updateRecipeCost = () => {
+      let total = 0;
+      boqRows.querySelectorAll('.boq-row').forEach(row => {
+        const material = rawMaterials.find(item => item.id === Number(row.querySelector('.bq-material').value));
+        const quantity = Number(row.querySelector('.bq-qty').value) || 0;
+        const unit = row.querySelector('.bq-unit').value;
+        if (material) total += convertForCost(quantity, unit, material.unit) * Number(material.costPerUnit);
+      });
+      $('#mf-recipe-cost').textContent = Ui.fmt(total);
+    };
     const addBoqRow = (line = {}) => {
       const row = document.createElement('div');
       row.className = 'boq-row';
+      const matched = rawMaterials.find(material => material.id === Number(line.rawMaterialId)) || rawMaterials.find(material => material.name.toLowerCase() === String(line.ingredient || '').toLowerCase());
       row.innerHTML = `
-        <input class="bq-ing" placeholder="Ingredient (e.g. Milk)" value="${Ui.esc(line.ingredient || '')}"/>
+        <select class="bq-material"><option value="">Select raw material</option>${rawMaterials.map(material => `<option value="${material.id}" ${matched?.id === material.id ? 'selected' : ''}>${Ui.esc(material.name)} (${RawMaterials.qty(material.stock)} ${Ui.esc(material.unit)} available)</option>`).join('')}</select>
         <input class="bq-qty" type="number" min="0" step="any" placeholder="Qty" value="${line.qty ?? ''}"/>
         <select class="bq-unit">
           <option value="" ${line.unit ? '' : 'selected'} disabled>Select unit</option>
-          ${unitOptions(ingredientUnits, line.unit || '')}
+          ${unitOptions(ingredientUnits, line.unit || matched?.unit || '')}
         </select>
         <button type="button" class="bq-del" title="Remove">✕</button>`;
-      row.querySelector('.bq-del').addEventListener('click', () => row.remove());
+      row.querySelector('.bq-material').addEventListener('change', event => {
+        const material = rawMaterials.find(item => item.id === Number(event.target.value));
+        if (material) row.querySelector('.bq-unit').value = material.unit;
+        updateRecipeCost();
+      });
+      row.querySelector('.bq-qty').addEventListener('input', updateRecipeCost);
+      row.querySelector('.bq-unit').addEventListener('change', updateRecipeCost);
+      row.querySelector('.bq-del').addEventListener('click', () => { row.remove(); updateRecipeCost(); });
       boqRows.appendChild(row);
+      updateRecipeCost();
     };
     (Array.isArray(p?.boq) && p.boq.length ? p.boq : [{}]).forEach(addBoqRow);
     $('#mf-boq-add').addEventListener('click', () => addBoqRow());
@@ -192,6 +220,10 @@ const Menu = {
       const own = $('#mf-source').value === 'own';
       $('#mf-boq-wrap').style.display = own ? '' : 'none';
       $('#mf-out-hint').style.display = own ? 'none' : '';
+      if (!isEdit) {
+        $('#mf-stock').disabled = own;
+        if (own) $('#mf-stock').value = 0;
+      }
     };
     syncSource();
     $('#mf-source').addEventListener('change', syncSource);
@@ -224,16 +256,24 @@ const Menu = {
         sourceType: $('#mf-source').value
       };
       if (body.sourceType === 'own') {
-        body.boq = [...m.el.querySelectorAll('.boq-row')].map(r => ({
-          ingredient: r.querySelector('.bq-ing').value.trim(),
-          qty: parseFloat(r.querySelector('.bq-qty').value) || 0,
-          unit: r.querySelector('.bq-unit').value.trim()
-        })).filter(l => l.ingredient && l.qty > 0);
+        body.boq = [...m.el.querySelectorAll('.boq-row')].map(r => {
+          const rawMaterialId = Number(r.querySelector('.bq-material').value);
+          const material = rawMaterials.find(item => item.id === rawMaterialId);
+          return {
+            rawMaterialId,
+            ingredient: material?.name || '',
+            qty: parseFloat(r.querySelector('.bq-qty').value) || 0,
+            unit: r.querySelector('.bq-unit').value.trim()
+          };
+        }).filter(line => line.rawMaterialId && line.qty > 0);
       } else {
         body.boq = [];
       }
       if (!body.name || isNaN(body.sellingPrice) || isNaN(body.purchasePrice)) {
         Ui.toast('Name, selling price and cost price are required', 'error'); return;
+      }
+      if (body.sourceType === 'own' && !body.boq.length) {
+        Ui.toast('Add at least one linked raw material to the recipe', 'error'); return;
       }
       if (!isEdit && !selectedImageData) {
         if (!$('#mf-img-url').value.trim()) {
@@ -242,10 +282,16 @@ const Menu = {
       }
       if (selectedImageData) body.imageData = selectedImageData;
       else if ($('#mf-img-url').value.trim()) body.imageUrl = $('#mf-img-url').value.trim();
-      body.stock = parseInt($('#mf-stock').value) || 0;
+      const openingStock = isEdit ? 0 : (parseInt($('#mf-stock').value) || 0);
+      if (!isEdit) body.stock = body.sourceType === 'own' ? 0 : openingStock;
       try {
         if (isEdit) await Api.put(`/grocery/${p.id}`, body);
-        else await Api.post('/grocery', body);
+        else {
+          const saved = await Api.post('/grocery', body);
+          if (body.sourceType === 'own' && openingStock > 0) {
+            await Api.put(`/grocery/${saved.id}/restock`, { quantity: openingStock });
+          }
+        }
         Ui.toast(isEdit ? 'Item updated' : 'Item added to menu');
         m.close();
         this.render(document.getElementById('page'));
@@ -254,6 +300,10 @@ const Menu = {
   },
 
   openRestock(p) {
+    if (p.sourceType === 'own') {
+      Stock._restock(p, () => this.render(document.getElementById('page')));
+      return;
+    }
     const measured = p.saleMode === 'measured';
     const m = Ui.modal({
       title: `Restock · ${Ui.esc(p.name)}`,

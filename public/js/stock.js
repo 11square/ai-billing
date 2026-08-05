@@ -2,6 +2,7 @@
 const Stock = {
   tab: 'stock',
   products: [],
+  rawMaterials: [],
   vendors: [],
   purchases: [],
   sourceFilter: 'outsourced',
@@ -9,6 +10,7 @@ const Stock = {
   render(el) {
     el.innerHTML = `
       <div class="rep-tabs" id="stk-tabs">
+        <button class="rep-tab ${this.tab === 'raw' ? 'active' : ''}" data-t="raw">Raw Materials</button>
         <button class="rep-tab ${this.tab === 'stock' ? 'active' : ''}" data-t="stock">📦 Stock Overview</button>
         <button class="rep-tab ${this.tab === 'po' ? 'active' : ''}" data-t="po">📝 Purchase Orders</button>
         <button class="rep-tab ${this.tab === 'vendors' ? 'active' : ''}" data-t="vendors">🏢 Vendors</button>
@@ -27,6 +29,7 @@ const Stock = {
     const box = document.getElementById('stk-body');
     if (!box) return;
     if (this.tab === 'stock') this.stockTab(box);
+    else if (this.tab === 'raw') RawMaterials.render(box);
     else if (this.tab === 'po') this.poTab(box);
     else Vendors.render(box);
   },
@@ -104,7 +107,7 @@ const Stock = {
     render();
   },
 
-  _restock(p) {
+  _restock(p, onDone) {
     const measured = p.saleMode === 'measured';
     const m = Ui.modal({
       title: `Restock · ${Ui.esc(p.name)}`,
@@ -121,7 +124,8 @@ const Stock = {
         await Api.put(`/grocery/${p.id}/restock`, { quantity: qty });
         Ui.toast(`Added ${qty} × ${p.name}`);
         m.close();
-        this.loadTab();
+        if (onDone) onDone();
+        else this.loadTab();
       } catch (e) { Ui.toast(e.message, 'error'); }
     });
   },
@@ -172,12 +176,34 @@ const Stock = {
   async openPoForm(prefillProduct) {
     // ensure products & vendors are loaded
     try {
-      if (!this.products.length) this.products = (await Api.get('/grocery')).products || [];
-      this.vendors = (await Api.get('/vendors')).vendors || [];
+      const [productResult, vendorResult, rawResult] = await Promise.all([
+        this.products.length ? Promise.resolve({ products: this.products }) : Api.get('/grocery'),
+        Api.get('/vendors'),
+        Api.get('/raw-materials')
+      ]);
+      this.products = productResult.products || [];
+      this.vendors = vendorResult.vendors || [];
+      this.rawMaterials = rawResult.materials || [];
     } catch (e) { Ui.toast(e.message, 'error'); return; }
 
     const outsourced = this.products.filter(p => (p.sourceType || 'own') === 'outsourced');
-    const pool = outsourced.length ? outsourced : this.products;
+    const productPool = outsourced.length ? outsourced : this.products;
+    const pool = [
+      ...productPool.map(product => ({ ...product, itemKind: 'product', itemKey: `product:${product.id}` })),
+      ...this.rawMaterials.map(material => ({
+        ...material,
+        itemKind: 'raw_material',
+        itemKey: `raw_material:${material.id}`,
+        rawMaterialId: material.id,
+        purchasePrice: material.costPerUnit,
+        sellingPrice: null,
+        mrp: null,
+        category: material.category || 'Raw Material'
+      }))
+    ];
+    const prefillKey = prefillProduct
+      ? `${prefillProduct.itemKind === 'raw_material' ? 'raw_material' : 'product'}:${prefillProduct.rawMaterialId || prefillProduct.id}`
+      : null;
     const today = new Date();
     const pad = n => String(n).padStart(2, '0');
     const todayStr = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
@@ -227,13 +253,13 @@ const Stock = {
       const row = document.createElement('div');
       row.className = 'po-row';
       row.innerHTML = `
-        <select class="po-prod">${pool.map(p => `<option value="${p.id}" ${product && p.id === product.id ? 'selected' : ''}>${Ui.esc(p.name)}</option>`).join('')}</select>
-        <input class="po-qty" type="number" min="1" placeholder="Qty" value="10"/>
+        <select class="po-prod">${pool.map(p => `<option value="${p.itemKey}" ${(product && p.itemKey === prefillKey) ? 'selected' : ''}>${p.itemKind === 'raw_material' ? '[Raw] ' : ''}${Ui.esc(p.name)} (${Ui.esc(p.unit || '')})</option>`).join('')}</select>
+        <input class="po-qty" type="number" min="0.001" step="0.001" placeholder="Qty" value="10"/>
         <input class="po-cost" type="number" min="0" step="0.01" placeholder="Cost ₹"/>
         <span class="po-line-total">₹0</span>
         <button type="button" class="bq-del" title="Remove">✕</button>`;
       const syncCost = () => {
-        const p = pool.find(x => x.id === parseInt(row.querySelector('.po-prod').value));
+        const p = pool.find(x => x.itemKey === row.querySelector('.po-prod').value);
         if (p) row.querySelector('.po-cost').value = parseFloat(p.purchasePrice);
         updateTotal();
       };
@@ -266,11 +292,14 @@ const Stock = {
       const vendor = this.vendors.find(v => v.id === vendorId);
       if (!vendor) { Ui.toast('Select a vendor', 'error'); return; }
       const items = [...rowsEl.querySelectorAll('.po-row')].map(r => {
-        const p = pool.find(x => x.id === parseInt(r.querySelector('.po-prod').value));
-        const quantity = parseInt(r.querySelector('.po-qty').value) || 0;
+        const p = pool.find(x => x.itemKey === r.querySelector('.po-prod').value);
+        const quantity = parseFloat(r.querySelector('.po-qty').value) || 0;
         const cost = parseFloat(r.querySelector('.po-cost').value) || 0;
         return p && quantity > 0 ? {
-          productId: p.id, name: p.name, category: p.category, unit: p.unit,
+          itemKind: p.itemKind,
+          productId: p.itemKind === 'product' ? p.id : null,
+          rawMaterialId: p.itemKind === 'raw_material' ? p.id : null,
+          name: p.name, category: p.category, unit: p.unit,
           quantity, cost, sellingPrice: parseFloat(p.sellingPrice), mrp: parseFloat(p.mrp),
           totalCost: quantity * cost
         } : null;

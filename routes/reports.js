@@ -5,6 +5,7 @@ const { Invoice, InvoiceItem } = require('../models/Invoice');
 const { Purchase } = require('../models/Purchase');
 const GroceryProduct = require('../models/GroceryProduct');
 const FertilizerProduct = require('../models/FertilizerProduct');
+const { RawMaterial } = require('../models/RawMaterial');
 const { auth } = require('../middleware/auth');
 const { DailyReport } = require('../models/Report');
 const reportService = require('../services/reportService');
@@ -186,6 +187,12 @@ router.get('/stock', auth, async (req, res) => {
       products = products.concat(groceryProducts.map(p => ({
         ...p.toJSON(),
         type: 'grocery'
+      })));
+      const rawMaterials = await RawMaterial.findAll({ where: { isActive: true, shopType: 'grocery' } });
+      products = products.concat(rawMaterials.map(material => ({
+        ...material.toJSON(),
+        purchasePrice: material.costPerUnit,
+        type: 'raw_material'
       })));
     }
 
@@ -421,6 +428,9 @@ router.get('/dashboard', auth, async (req, res) => {
         });
         lowStockCount += groceryProducts.filter(p => p.stock <= p.minStock).length;
         stockValue += groceryProducts.reduce((sum, p) => sum + (Number(p.stock) * Number(p.purchasePrice || 0)), 0);
+        const rawMaterials = await RawMaterial.findAll({ where: { isActive: true, shopType: 'grocery' } });
+        lowStockCount += rawMaterials.filter(material => Number(material.stock) <= Number(material.minStock)).length;
+        stockValue += rawMaterials.reduce((sum, material) => sum + (Number(material.stock) * Number(material.costPerUnit || 0)), 0);
       }
       if (!shopType || shopType === 'fertilizer') {
         const fertilizerProducts = await FertilizerProduct.findAll({

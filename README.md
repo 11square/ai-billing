@@ -12,6 +12,7 @@ MySQL persistence through Sequelize.
 - Grocery and fertilizer product modules
 - Menu, stock and purchase order management
 - Vendor master data, payable balances, purchase ledger, payments, debit notes and credit adjustments
+- Raw-material inventory, stock movements, low-stock alerts, weighted cost, recipe linking and production consumption
 - Customer credit tracking
 - Staff and attendance management
 - Scheduled and on-demand reports

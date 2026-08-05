@@ -18,6 +18,7 @@ router.use('/invoices', require('./invoices'));
 router.use('/reports', require('./reports'));
 router.use('/purchases', require('./purchases'));
 router.use('/vendors', require('./vendors'));
+router.use('/raw-materials', require('./rawMaterials'));
 router.use('/staff', require('./staff'));
 router.use('/attendance', require('./attendance'));
 

@@ -171,6 +171,16 @@ const PurchaseItem = sequelize.define('PurchaseItem', {
         type: DataTypes.INTEGER,
         field: 'product_id'
     },
+    rawMaterialId: {
+        type: DataTypes.INTEGER,
+        field: 'raw_material_id'
+    },
+    itemKind: {
+        type: DataTypes.ENUM('product', 'raw_material'),
+        allowNull: false,
+        defaultValue: 'product',
+        field: 'item_kind'
+    },
     productType: {
         type: DataTypes.ENUM('grocery', 'fertilizer'),
         field: 'product_type'
@@ -186,7 +196,7 @@ const PurchaseItem = sequelize.define('PurchaseItem', {
         type: DataTypes.STRING(20)
     },
     quantity: {
-        type: DataTypes.INTEGER,
+        type: DataTypes.DECIMAL(12, 3),
         allowNull: false
     },
     cost: {
