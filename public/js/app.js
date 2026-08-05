@@ -6,7 +6,6 @@ const App = {
     invoices:  { title: 'Invoices', mod: () => Invoices },
     menu:      { title: 'Menu Items', mod: () => Menu },
     stock:     { title: 'Stock & Purchase Orders', mod: () => Stock },
-    vendors:   { title: 'Vendors & Purchase Ledger', mod: () => Vendors },
     customers: { title: 'Customers', mod: () => Customers },
     staff:     { title: 'Staff & Attendance', mod: () => Staff },
     reports:   { title: 'Reports', mod: () => Reports },

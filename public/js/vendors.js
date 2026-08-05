@@ -34,7 +34,7 @@ const Vendors = {
     el.querySelector('#vendor-add').addEventListener('click', () => this.openForm());
     el.querySelector('#vendor-new-po').addEventListener('click', () => {
       Stock.tab = 'po';
-      location.hash = '#stock';
+      Stock.render(document.getElementById('page'));
       setTimeout(() => Stock.openPoForm(), 50);
     });
     await this.load();

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ai-bill-v3';
+const CACHE_NAME = 'ai-bill-v4';
 const APP_SHELL = [
   '/',
   '/css/style.css',
