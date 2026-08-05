@@ -10,8 +10,8 @@ const Stock = {
   render(el) {
     el.innerHTML = `
       <div class="rep-tabs" id="stk-tabs">
-        <button class="rep-tab ${this.tab === 'raw' ? 'active' : ''}" data-t="raw">Raw Materials</button>
         <button class="rep-tab ${this.tab === 'stock' ? 'active' : ''}" data-t="stock">📦 Stock Overview</button>
+        <button class="rep-tab ${this.tab === 'raw' ? 'active' : ''}" data-t="raw">📋 Inventory</button>
         <button class="rep-tab ${this.tab === 'po' ? 'active' : ''}" data-t="po">📝 Purchase Orders</button>
         <button class="rep-tab ${this.tab === 'vendors' ? 'active' : ''}" data-t="vendors">🏢 Vendors</button>
       </div>
