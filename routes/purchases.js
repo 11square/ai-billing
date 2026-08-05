@@ -329,7 +329,9 @@ router.delete('/:id', auth, async (req, res) => {
                         throw new Error(`Cannot delete PO: ${material.name} stock has already been consumed`);
                     }
                     const newStock = roundQty(Number(material.stock) - quantity);
-                    await material.update({ stock: newStock }, { transaction: t });
+                    const remainingValue = (Number(material.stock) * Number(material.costPerUnit)) - (quantity * Number(item.cost));
+                    const newCost = newStock > 0 ? Math.max(0, roundMoney(remainingValue / newStock)) : 0;
+                    await material.update({ stock: newStock, costPerUnit: newCost }, { transaction: t });
                     await RawMaterialMovement.create({
                         rawMaterialId: material.id,
                         movementType: 'return_to_vendor',
